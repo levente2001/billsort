@@ -14,7 +14,8 @@ Firebase beallitas nelkul a felulet demó módban indul, hogy localhoston azonna
 ## Firebase
 
 1. Hozz letre egy Firebase projektet.
-2. Kapcsold be a Firestore Database es Storage szolgaltatasokat.
+2. Kapcsold be a Firestore Database, Storage es Authentication szolgaltatasokat.
+   - Authentication alatt engedelyezd az Email/Password bejelentkezesi modot.
 3. Masold a `.env.example` tartalmat `.env.local` fajlba.
 4. Toltsd ki a `VITE_FIREBASE_*` valtozokat a Firebase web app config alapjan.
 5. Inditsd ujra a dev servert.
@@ -25,4 +26,6 @@ Vercelen ugyanazokat a `VITE_FIREBASE_*` valtozokat add hozza az Environment Var
 
 - `months`: havi fulek
 - `months/{monthId}/items`: az adott honap teteleinek listaja
+- `auditLogs`: berlohoz kotott modositasnaplo
+- `users`: felhasznaloi profilok es berlo-tulajdonos kapcsolatok
 - Storage: `months/{monthId}/items/{itemId}/...pdf`

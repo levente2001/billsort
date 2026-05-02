@@ -1,15 +1,26 @@
 import { initializeApp } from "firebase/app";
 import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
+import {
   addDoc,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getFirestore,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import {
   deleteObject,
@@ -31,11 +42,15 @@ const firebaseConfig = {
 export const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean);
 
 const app = hasFirebaseConfig ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
 const db = app ? getFirestore(app) : null;
 const storage = app ? getStorage(app) : null;
 
 const monthsCollection = () => collection(db, "months");
 const itemsCollection = (monthId) => collection(db, "months", monthId, "items");
+const usersCollection = () => collection(db, "users");
+const auditLogsCollection = () => collection(db, "auditLogs");
+const userDoc = (uid) => doc(db, "users", uid);
 
 function cleanStorageName(name) {
   return name
@@ -67,12 +82,109 @@ async function deleteStoredFile(file) {
   await deleteObject(ref(storage, file.path));
 }
 
-export function createFirebaseRepository() {
+async function writeAuditLog(tenantId, actor, action, details) {
+  await addDoc(auditLogsCollection(), {
+    tenantId,
+    actorEmail: actor?.email || "ismeretlen",
+    actorRole: actor?.role || "ismeretlen",
+    action,
+    details,
+    createdAt: serverTimestamp(),
+  });
+}
+
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
+
+async function readUserProfile(user) {
+  if (!user) return null;
+
+  const snapshot = await getDoc(userDoc(user.uid));
+  if (snapshot.exists()) return { id: snapshot.id, ...snapshot.data() };
+
+  const email = normalizeEmail(user.email || "");
+  const profile = {
+    email,
+    role: email === "kalolevente@gmail.com" ? "tenant" : "tenant",
+    createdAt: serverTimestamp(),
+  };
+  await setDoc(userDoc(user.uid), profile);
+
+  return { id: user.uid, ...profile };
+}
+
+export function createFirebaseAuthService() {
+  return {
+    subscribe(callback) {
+      return onAuthStateChanged(auth, async (user) => {
+        const profile = await readUserProfile(user);
+        callback(user, profile);
+      });
+    },
+
+    async signIn(email, password) {
+      await signInWithEmailAndPassword(auth, normalizeEmail(email), password);
+    },
+
+    async register(email, password, role) {
+      const credentials = await createUserWithEmailAndPassword(auth, normalizeEmail(email), password);
+      const profile = {
+        email: normalizeEmail(email),
+        role,
+        createdAt: serverTimestamp(),
+      };
+
+      await setDoc(userDoc(credentials.user.uid), profile);
+      return credentials.user;
+    },
+
+    async signOut() {
+      await signOut(auth);
+    },
+  };
+}
+
+export async function migrateLegacyMonthsToTenant(tenantId, email) {
+  if (normalizeEmail(email || "") !== "kalolevente@gmail.com") return;
+
+  const snapshot = await getDocs(monthsCollection());
+  await Promise.all(
+    snapshot.docs
+      .filter((entry) => !entry.data().tenantId)
+      .map((entry) => updateDoc(entry.ref, { tenantId })),
+  );
+}
+
+export function subscribeTenantsForOwner(ownerEmail, callback) {
+  const q = query(usersCollection(), where("ownerEmailLower", "==", normalizeEmail(ownerEmail || "")));
+  return onSnapshot(q, (snapshot) => {
+    callback(
+      snapshot.docs
+        .map((entry) => ({ id: entry.id, ...entry.data() }))
+        .filter((profile) => profile.role === "tenant"),
+    );
+  });
+}
+
+export async function addOwnerToTenant(tenantId, ownerEmail, actor) {
+  const normalized = normalizeEmail(ownerEmail);
+  await updateDoc(userDoc(tenantId), {
+    ownerEmail: normalized,
+    ownerEmailLower: normalized,
+    ownerAddedAt: serverTimestamp(),
+  });
+  await writeAuditLog(tenantId, actor, "Tulajdonos hozzáadása", `Tulajdonos email: ${normalized}`);
+}
+
+export function createFirebaseRepository(tenantId, viewer) {
   return {
     mode: "firebase",
+    tenantId,
+    viewer,
 
     subscribeMonths(callback) {
-      const q = query(monthsCollection(), orderBy("createdAt", "desc"));
+      const q = query(monthsCollection(), where("tenantId", "==", tenantId));
       return onSnapshot(q, (snapshot) => {
         callback(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
       });
@@ -85,11 +197,21 @@ export function createFirebaseRepository() {
       });
     },
 
+    subscribeAuditLogs(callback) {
+      const q = query(auditLogsCollection(), where("tenantId", "==", tenantId));
+      return onSnapshot(q, (snapshot) => {
+        callback(snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() })));
+      });
+    },
+
     async createMonth(label) {
-      return addDoc(monthsCollection(), {
+      const monthRef = await addDoc(monthsCollection(), {
         label,
+        tenantId,
         createdAt: serverTimestamp(),
       });
+      await writeAuditLog(tenantId, viewer, "Hónap létrehozása", label);
+      return monthRef;
     },
 
     async deleteMonth(monthId, items) {
@@ -101,6 +223,7 @@ export function createFirebaseRepository() {
       );
       await Promise.all(items.map((item) => deleteDoc(doc(db, "months", monthId, "items", item.id))));
       await deleteDoc(doc(db, "months", monthId));
+      await writeAuditLog(tenantId, viewer, "Hónap törlése", `${items.length} tétel törölve`);
     },
 
     async createItem(monthId, data) {
@@ -109,6 +232,9 @@ export function createFirebaseRepository() {
         amount: Number(data.amount || 0),
         note: data.note || "",
         paid: data.paid,
+        ownerAccepted: false,
+        ownerAcceptedAt: null,
+        ownerAcceptedBy: null,
         createdAt: serverTimestamp(),
       });
 
@@ -118,6 +244,7 @@ export function createFirebaseRepository() {
       ]);
 
       await updateDoc(itemRef, { invoiceFile, receiptFile });
+      await writeAuditLog(tenantId, viewer, "Tétel létrehozása", `${data.name} (${Number(data.amount || 0)} Ft)`);
       return itemRef;
     },
 
@@ -143,14 +270,34 @@ export function createFirebaseRepository() {
         amount: Number(data.amount || 0),
         note: data.note || "",
         paid: data.paid,
+        ownerAccepted: item.ownerAccepted || false,
+        ownerAcceptedAt: item.ownerAcceptedAt || null,
+        ownerAcceptedBy: item.ownerAcceptedBy || null,
         invoiceFile,
         receiptFile,
       });
+      await writeAuditLog(tenantId, viewer, "Tétel módosítása", `${item.name} -> ${data.name}`);
     },
 
     async deleteItem(monthId, item) {
       await Promise.all([deleteStoredFile(item.invoiceFile), deleteStoredFile(item.receiptFile)]);
       await deleteDoc(doc(db, "months", monthId, "items", item.id));
+      await writeAuditLog(tenantId, viewer, "Tétel törlése", item.name || "Névtelen tétel");
+    },
+
+    async acceptItem(monthId, item) {
+      const itemRef = doc(db, "months", monthId, "items", item.id);
+      await updateDoc(itemRef, {
+        ownerAccepted: true,
+        ownerAcceptedAt: serverTimestamp(),
+        ownerAcceptedBy: viewer?.email || null,
+      });
+      await writeAuditLog(
+        tenantId,
+        viewer,
+        "Tulajdonosi elfogadás",
+        `Elfogadott tétel: ${item.name || "Névtelen tétel"}`,
+      );
     },
   };
 }

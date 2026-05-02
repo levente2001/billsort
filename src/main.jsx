@@ -4,24 +4,34 @@ import {
   ArrowLeft,
   BarChart2,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Download,
   FilePenLine,
   FileText,
   FileWarning,
   FileX,
+  LogOut,
   Loader2,
   Menu,
   Plus,
   PlusCircle,
   Save,
+  Settings,
   Trash2,
   TrendingUp,
   Upload,
   Wallet,
   X,
 } from "lucide-react";
-import { createFirebaseRepository, hasFirebaseConfig } from "./firebase";
+import {
+  addOwnerToTenant,
+  createFirebaseAuthService,
+  createFirebaseRepository,
+  hasFirebaseConfig,
+  migrateLegacyMonthsToTenant,
+  subscribeTenantsForOwner,
+} from "./firebase";
 import { createLocalRepository } from "./localRepository";
 import "./styles.css";
 
@@ -36,6 +46,14 @@ const monthFormatter = new Intl.DateTimeFormat("hu-HU", {
   month: "long",
 });
 
+const auditDateFormatter = new Intl.DateTimeFormat("hu-HU", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 const protectedActionPassword = "levente2001";
 
 function getCreatedAtTime(entry) {
@@ -48,13 +66,27 @@ function getCreatedAtTime(entry) {
 }
 
 function App() {
+  const authService = useMemo(() => (hasFirebaseConfig ? createFirebaseAuthService() : null), []);
+  const [authReady, setAuthReady] = useState(!hasFirebaseConfig);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [ownerTenants, setOwnerTenants] = useState([]);
+  const [selectedTenantId, setSelectedTenantId] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const activeTenantId = hasFirebaseConfig ? (profile?.role === "owner" ? selectedTenantId : user?.uid) : "local";
   const repository = useMemo(
-    () => (hasFirebaseConfig ? createFirebaseRepository() : createLocalRepository()),
-    [],
+    () =>
+      hasFirebaseConfig
+        ? activeTenantId
+          ? createFirebaseRepository(activeTenantId, profile)
+          : null
+        : createLocalRepository(),
+    [activeTenantId, profile],
   );
   const [months, setMonths] = useState([]);
   const [activeMonthId, setActiveMonthId] = useState("");
   const [itemsByMonth, setItemsByMonth] = useState({});
+  const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -70,7 +102,52 @@ function App() {
     [months],
   );
 
-  useEffect(() => repository.subscribeMonths(setMonths), [repository]);
+  useEffect(() => {
+    if (!authService) return undefined;
+
+    return authService.subscribe((nextUser, nextProfile) => {
+      setUser(nextUser);
+      setProfile(nextProfile);
+      setAuthReady(true);
+    });
+  }, [authService]);
+
+  useEffect(() => {
+    if (!user || profile?.role !== "tenant") return;
+
+    migrateLegacyMonthsToTenant(user.uid, profile.email).catch((err) => {
+      setError("Nem sikerult a regi honapokat a fiokhoz rendelni.");
+      console.error(err);
+    });
+  }, [profile, user]);
+
+  useEffect(() => {
+    if (!profile || profile.role !== "owner") return undefined;
+
+    return subscribeTenantsForOwner(profile.email, (tenants) => {
+      setOwnerTenants(tenants);
+      setSelectedTenantId((current) => current || tenants[0]?.id || "");
+    });
+  }, [profile]);
+
+  useEffect(() => {
+    setMonths([]);
+    setItemsByMonth({});
+    setAuditLogs([]);
+    setActiveMonthId("");
+  }, [activeTenantId]);
+
+  useEffect(() => {
+    if (!repository) return undefined;
+
+    return repository.subscribeMonths(setMonths);
+  }, [repository]);
+
+  useEffect(() => {
+    if (!repository?.subscribeAuditLogs) return undefined;
+
+    return repository.subscribeAuditLogs(setAuditLogs);
+  }, [repository]);
 
   useEffect(() => {
     if (!activeMonthId && sortedMonths.length > 0) {
@@ -79,6 +156,8 @@ function App() {
   }, [activeMonthId, sortedMonths]);
 
   useEffect(() => {
+    if (!repository) return undefined;
+
     const unsubscribers = months.map((month) =>
       repository.subscribeItems(month.id, (monthItems) => {
         setItemsByMonth((current) => ({ ...current, [month.id]: monthItems }));
@@ -130,6 +209,8 @@ function App() {
   };
 
   async function addMonth(label) {
+    if (!repository) return;
+
     setError("");
     setLoading(true);
     try {
@@ -146,7 +227,7 @@ function App() {
   }
 
   async function addItem(data) {
-    if (!activeMonthId) return;
+    if (!repository || !activeMonthId) return;
 
     setError("");
     setLoading(true);
@@ -162,7 +243,7 @@ function App() {
   }
 
   async function updateItem(data) {
-    if (!activeMonthId || !editingItem) return;
+    if (!repository || !activeMonthId || !editingItem) return;
 
     setError("");
     setLoading(true);
@@ -179,6 +260,8 @@ function App() {
   }
 
   async function deleteItem(item) {
+    if (!repository) return;
+
     setError("");
     setLoading(true);
     try {
@@ -192,6 +275,8 @@ function App() {
   }
 
   async function deleteMonth() {
+    if (!repository) return;
+
     setError("");
     setLoading(true);
     try {
@@ -218,6 +303,33 @@ function App() {
     setDeleteRequest(null);
   }
 
+  async function acceptItem(item) {
+    if (!repository || !activeMonthId) return;
+
+    setError("");
+    setLoading(true);
+    try {
+      await repository.acceptItem(activeMonthId, item);
+    } catch (err) {
+      setError("Nem sikerult elfogadni a tetelt.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!authReady) {
+    return <LoadingScreen />;
+  }
+
+  if (hasFirebaseConfig && !user) {
+    return <AuthPage authService={authService} />;
+  }
+
+  const isOwner = profile?.role === "owner";
+  const isTenant = !hasFirebaseConfig || profile?.role === "tenant";
+  const activeTenant = isOwner ? ownerTenants.find((tenant) => tenant.id === selectedTenantId) : profile;
+
   return (
     <div className="app-frame">
       <Header
@@ -228,20 +340,36 @@ function App() {
           setModalOpen(true);
         }}
         onStats={() => setStatsRequestOpen(true)}
-        hasActiveMonth={Boolean(activeMonth)}
+        onAudit={() => setView("audit")}
+        onSettings={() => setSettingsOpen(true)}
+        onLogout={() => authService?.signOut()}
+        hasActiveMonth={Boolean(activeMonth) && isTenant}
+        canAddItem={isTenant}
+        canViewStats={isTenant}
+        userEmail={profile?.email}
+        role={profile?.role}
       />
 
-      {view === "dashboard" && (
+      {isOwner && (
+        <OwnerTenantBar
+          tenants={ownerTenants}
+          selectedTenantId={selectedTenantId}
+          onSelect={setSelectedTenantId}
+        />
+      )}
+
+      {view === "dashboard" && repository && (
         <MonthTabs
           months={sortedMonths}
           activeMonthId={activeMonthId}
           setActiveMonthId={setActiveMonthId}
           onAddMonth={() => setMonthModalOpen(true)}
           loading={loading}
+          canAddMonth={isTenant}
         />
       )}
 
-      {repository.mode === "local" && (
+      {repository?.mode === "local" && (
         <aside className="notice slim">
           Firebase env valtozok nelkul demo modban fut. Az eles menteshez toltsd ki a `.env.local`
           fajlt.
@@ -250,10 +378,24 @@ function App() {
 
       {error && <aside className="error slim">{error}</aside>}
 
-      {view === "stats" ? (
+      {!repository && isOwner ? (
+        <main className="page-shell empty-page">
+          <FileX size={42} />
+          <h1>Nincs hozzárendelt bérlő.</h1>
+          <p>A bérlő a beállításokban tud hozzáadni téged az email címed alapján.</p>
+        </main>
+      ) : view === "audit" ? (
+        <AuditLogPage
+          logs={auditLogs}
+          activeTenant={activeTenant}
+          onBack={() => setView("dashboard")}
+        />
+      ) : view === "stats" ? (
         <StatisticsPage globalStats={globalStats} monthStats={monthStats} onBack={() => setView("dashboard")} />
       ) : (
         <DashboardPage
+          viewerRole={profile?.role || "tenant"}
+          activeTenant={activeTenant}
           activeMonth={activeMonth}
           items={items}
           total={total}
@@ -268,6 +410,7 @@ function App() {
           onEditItem={(item) => {
             setEditRequest(item);
           }}
+          onAcceptItem={acceptItem}
         />
       )}
 
@@ -284,10 +427,26 @@ function App() {
       />
 
       <AddMonthModal
-        open={monthModalOpen}
+        open={monthModalOpen && isTenant}
         onClose={() => setMonthModalOpen(false)}
         onSubmit={addMonth}
         loading={loading}
+      />
+
+      <SettingsModal
+        open={settingsOpen}
+        profile={profile}
+        activeTenant={activeTenant}
+        onClose={() => setSettingsOpen(false)}
+        onSaveOwnerEmail={async (ownerEmail) => {
+          if (!user) return;
+          await addOwnerToTenant(user.uid, ownerEmail, profile);
+          setProfile((current) => ({
+            ...current,
+            ownerEmail: ownerEmail.trim().toLowerCase(),
+            ownerEmailLower: ownerEmail.trim().toLowerCase(),
+          }));
+        }}
       />
 
       <ConfirmDeleteModal
@@ -330,12 +489,192 @@ function App() {
   );
 }
 
-function Header({ menuOpen, setMenuOpen, onAddItem, onStats, hasActiveMonth }) {
+function LoadingScreen() {
+  return (
+    <div className="app-frame loading-screen">
+      <Loader2 className="spin" size={32} />
+    </div>
+  );
+}
+
+function AuthPage({ authService }) {
+  const [mode, setMode] = useState("login");
+  const [role, setRole] = useState("tenant");
+  const [email, setEmail] = useState("kalolevente@gmail.com");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      if (mode === "login") {
+        await authService.signIn(email, password);
+      } else {
+        await authService.register(email, password, role);
+      }
+    } catch (err) {
+      setError(
+        mode === "login"
+          ? "Nem sikerült bejelentkezni. Ellenőrizd az emailt és a jelszót."
+          : "Nem sikerült regisztrálni. Lehet, hogy ez az email már létezik.",
+      );
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-panel">
+        <h1>BillSort</h1>
+        <p>{mode === "login" ? "Jelentkezz be a számláidhoz." : "Hozz létre bérlői vagy tulajdonosi fiókot."}</p>
+
+        <div className="auth-switch">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+            Bejelentkezés
+          </button>
+          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
+            Regisztráció
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="modal-form auth-form">
+          {mode === "register" && (
+            <div className="role-picker">
+              <button type="button" className={role === "tenant" ? "active" : ""} onClick={() => setRole("tenant")}>
+                Bérlő
+              </button>
+              <button type="button" className={role === "owner" ? "active" : ""} onClick={() => setRole("owner")}>
+                Tulajdonos
+              </button>
+            </div>
+          )}
+
+          <label>
+            Email *
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+          </label>
+
+          <label>
+            Jelszó *
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+          </label>
+
+          {error && <p className="password-error">{error}</p>}
+
+          <button className="primary-submit" type="submit" disabled={loading}>
+            {loading ? <Loader2 className="spin" size={18} /> : <Save size={18} />}
+            {loading ? "Folyamatban..." : mode === "login" ? "Bejelentkezés" : "Regisztráció"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function SettingsModal({ open, profile, activeTenant, onClose, onSaveOwnerEmail }) {
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+
+    setOwnerEmail(profile?.ownerEmail || "");
+    setMessage("");
+  }, [open, profile]);
+
+  if (!open) return null;
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!ownerEmail.trim()) return;
+
+    setLoading(true);
+    setMessage("");
+    try {
+      await onSaveOwnerEmail(ownerEmail);
+      setMessage("Tulajdonos hozzáadva.");
+    } catch (err) {
+      setMessage("Nem sikerült menteni a tulajdonost.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="modal-layer">
+      <button className="modal-backdrop" type="button" aria-label="Modal bezarasa" onClick={onClose} />
+      <section className="item-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+        <header>
+          <div>
+            <h2 id="settings-modal-title">Beállítások</h2>
+            <p>{profile?.role === "owner" ? "Tulajdonosi fiók" : "Bérlői fiók"}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Bezaras">
+            <X size={18} />
+          </button>
+        </header>
+
+        {profile?.role === "tenant" ? (
+          <form onSubmit={submit} className="modal-form">
+            <label>
+              Tulajdonos email címe *
+              <input
+                type="email"
+                value={ownerEmail}
+                onChange={(event) => setOwnerEmail(event.target.value)}
+                placeholder="tulajdonos@email.hu"
+                required
+              />
+            </label>
+            {message && <p className="settings-message">{message}</p>}
+            <button className="primary-submit" type="submit" disabled={loading}>
+              {loading ? <Loader2 className="spin" size={18} /> : <Save size={18} />}
+              {loading ? "Mentés..." : "Tulajdonos mentése"}
+            </button>
+          </form>
+        ) : (
+          <div className="settings-readonly">
+            <p>Bejelentkezett email: {profile?.email}</p>
+            <p>Aktív bérlő: {activeTenant?.email || "nincs hozzárendelt bérlő"}</p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Header({
+  menuOpen,
+  setMenuOpen,
+  onAddItem,
+  onStats,
+  onAudit,
+  onSettings,
+  onLogout,
+  hasActiveMonth,
+  canAddItem,
+  canViewStats,
+  userEmail,
+  role,
+}) {
   return (
     <header className="topbar">
       <button className="brand-button" type="button" aria-label="BillSort">
         BillSort
       </button>
+      {userEmail && (
+        <span className="account-pill">
+          {role === "owner" ? "Tulajdonos" : "Bérlő"} · {userEmail}
+        </span>
+      )}
       <div className="menu-wrap">
         <button className="icon-button" type="button" onClick={() => setMenuOpen((open) => !open)} aria-label="Menu">
           <Menu size={22} />
@@ -344,26 +683,60 @@ function Header({ menuOpen, setMenuOpen, onAddItem, onStats, hasActiveMonth }) {
           <>
             <button className="menu-backdrop" type="button" aria-label="Menu bezarasa" onClick={() => setMenuOpen(false)} />
             <div className="menu-popover">
+              {canAddItem && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onAddItem();
+                  }}
+                  disabled={!hasActiveMonth}
+                >
+                  <PlusCircle size={20} />
+                  Tétel hozzáadása
+                </button>
+              )}
+              {canViewStats && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onStats();
+                  }}
+                >
+                  <BarChart2 size={20} />
+                  Statisztika
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  onAddItem();
+                  onAudit();
                 }}
-                disabled={!hasActiveMonth}
               >
-                <PlusCircle size={20} />
-                Tétel hozzáadása
+                <ClipboardList size={20} />
+                Audit log
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  onStats();
+                  onSettings();
                 }}
               >
-                <BarChart2 size={20} />
-                Statisztika
+                <Settings size={20} />
+                Beállítások
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onLogout();
+                }}
+              >
+                <LogOut size={20} />
+                Kijelentkezés
               </button>
             </div>
           </>
@@ -373,18 +746,39 @@ function Header({ menuOpen, setMenuOpen, onAddItem, onStats, hasActiveMonth }) {
   );
 }
 
-function MonthTabs({ months, activeMonthId, setActiveMonthId, onAddMonth, loading }) {
+function OwnerTenantBar({ tenants, selectedTenantId, onSelect }) {
+  return (
+    <nav className="owner-tenant-bar" aria-label="Berlo valasztasa">
+      <span>Bérlő</span>
+      <select value={selectedTenantId} onChange={(event) => onSelect(event.target.value)}>
+        {tenants.length === 0 ? (
+          <option value="">Nincs hozzárendelt bérlő</option>
+        ) : (
+          tenants.map((tenant) => (
+            <option key={tenant.id} value={tenant.id}>
+              {tenant.email}
+            </option>
+          ))
+        )}
+      </select>
+    </nav>
+  );
+}
+
+function MonthTabs({ months, activeMonthId, setActiveMonthId, onAddMonth, loading, canAddMonth }) {
   return (
     <nav className="tabbar" aria-label="Havi fulek">
-      <button
-        className="tab add-tab"
-        type="button"
-        onClick={onAddMonth}
-        disabled={loading}
-        title="Uj honap hozzaadasa"
-      >
-        <Plus size={18} />
-      </button>
+      {canAddMonth && (
+        <button
+          className="tab add-tab"
+          type="button"
+          onClick={onAddMonth}
+          disabled={loading}
+          title="Uj honap hozzaadasa"
+        >
+          <Plus size={18} />
+        </button>
+      )}
       {months.map((month) => (
         <button
           type="button"
@@ -400,6 +794,8 @@ function MonthTabs({ months, activeMonthId, setActiveMonthId, onAddMonth, loadin
 }
 
 function DashboardPage({
+  viewerRole,
+  activeTenant,
   activeMonth,
   items,
   total,
@@ -409,6 +805,7 @@ function DashboardPage({
   onDeleteItem,
   onAddItem,
   onEditItem,
+  onAcceptItem,
 }) {
   if (!activeMonth) {
     return (
@@ -425,31 +822,44 @@ function DashboardPage({
       <section className="month-header">
         <div>
           <h1>{activeMonth.label}</h1>
+          {viewerRole === "owner" && activeTenant?.email && <small>{activeTenant.email}</small>}
           <p>
             {items.length} tétel · {currency.format(total)} · {paidCount}/{items.length} befizetve
           </p>
         </div>
-        <button className="text-action danger-action" type="button" onClick={onDeleteMonth} disabled={loading}>
-          <Trash2 size={16} />
-          Hónap törlése
-        </button>
+        {viewerRole === "tenant" && (
+          <button className="text-action danger-action" type="button" onClick={onDeleteMonth} disabled={loading}>
+            <Trash2 size={16} />
+            Hónap törlése
+          </button>
+        )}
       </section>
 
-      <ItemTable items={items} onDelete={onDeleteItem} onEdit={onEditItem} loading={loading} onAddItem={onAddItem} />
+      <ItemTable
+        viewerRole={viewerRole}
+        items={items}
+        onDelete={onDeleteItem}
+        onEdit={onEditItem}
+        onAccept={onAcceptItem}
+        loading={loading}
+        onAddItem={onAddItem}
+      />
     </main>
   );
 }
 
-function ItemTable({ items, onDelete, onEdit, loading, onAddItem }) {
+function ItemTable({ viewerRole, items, onDelete, onEdit, onAccept, loading, onAddItem }) {
   if (items.length === 0) {
     return (
       <section className="empty-list">
         <FileX size={44} />
         <p>Még nincs tétel ebben a hónapban.</p>
-        <button type="button" onClick={onAddItem}>
-          <PlusCircle size={18} />
-          Tétel hozzáadása
-        </button>
+        {viewerRole === "tenant" && (
+          <button type="button" onClick={onAddItem}>
+            <PlusCircle size={18} />
+            Tétel hozzáadása
+          </button>
+        )}
       </section>
     );
   }
@@ -477,12 +887,33 @@ function ItemTable({ items, onDelete, onEdit, loading, onAddItem }) {
             <FileChip file={item.receiptFile} label="Visszaig." />
           </div>
           <div className="action-cell">
-            <button className="edit-chip" type="button" onClick={() => onEdit(item)} disabled={loading} aria-label="Tetel szerkesztese">
-              <FilePenLine size={16} />
-            </button>
-            <button className="delete-chip" type="button" onClick={() => onDelete(item)} disabled={loading} aria-label="Tetel torlese">
-              <Trash2 size={16} />
-            </button>
+            {viewerRole === "owner" ? (
+              item.ownerAccepted ? (
+                <span className="accepted-chip">
+                  <CheckCircle2 size={14} />
+                  Elfogadva
+                </span>
+              ) : (
+                <button className="accept-chip" type="button" onClick={() => onAccept(item)} disabled={loading}>
+                  <CheckCircle2 size={14} />
+                  Elfogadom
+                </button>
+              )
+            ) : (
+              <>
+                {item.ownerAccepted && (
+                  <span className="accepted-icon" title="Tulajdonos elfogadta">
+                    <CheckCircle2 size={15} />
+                  </span>
+                )}
+                <button className="edit-chip" type="button" onClick={() => onEdit(item)} disabled={loading} aria-label="Tetel szerkesztese">
+                  <FilePenLine size={16} />
+                </button>
+                <button className="delete-chip" type="button" onClick={() => onDelete(item)} disabled={loading} aria-label="Tetel torlese">
+                  <Trash2 size={16} />
+                </button>
+              </>
+            )}
           </div>
         </article>
       ))}
@@ -500,6 +931,49 @@ function FileChip({ file, label }) {
       <Download size={12} />
       {label}
     </a>
+  );
+}
+
+function AuditLogPage({ logs, activeTenant, onBack }) {
+  const sortedLogs = useMemo(
+    () => [...logs].sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a)),
+    [logs],
+  );
+
+  return (
+    <main className="audit-page">
+      <header className="stats-top">
+        <button type="button" onClick={onBack} aria-label="Vissza">
+          <ArrowLeft size={22} />
+        </button>
+        <div>
+          <h1>Audit log</h1>
+          {activeTenant?.email && <p>{activeTenant.email}</p>}
+        </div>
+      </header>
+
+      <section className="audit-content">
+        {sortedLogs.length === 0 ? (
+          <p className="stats-empty">Még nincs naplózott módosítás.</p>
+        ) : (
+          <div className="audit-list">
+            {sortedLogs.map((entry) => (
+              <article className="audit-row" key={entry.id}>
+                <time>{auditDateFormatter.format(new Date(getCreatedAtTime(entry) || Date.now()))}</time>
+                <div>
+                  <strong>{entry.action}</strong>
+                  <p>{entry.details}</p>
+                </div>
+                <span>
+                  {entry.actorEmail}
+                  <small>{entry.actorRole === "owner" ? "Tulajdonos" : "Bérlő"}</small>
+                </span>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
 
