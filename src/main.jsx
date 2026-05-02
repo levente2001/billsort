@@ -63,6 +63,7 @@ function App() {
   const [monthModalOpen, setMonthModalOpen] = useState(false);
   const [deleteRequest, setDeleteRequest] = useState(null);
   const [editRequest, setEditRequest] = useState(null);
+  const [statsRequestOpen, setStatsRequestOpen] = useState(false);
   const [view, setView] = useState("dashboard");
   const sortedMonths = useMemo(
     () => [...months].sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a)),
@@ -226,7 +227,7 @@ function App() {
           setEditingItem(null);
           setModalOpen(true);
         }}
-        onStats={() => setView("stats")}
+        onStats={() => setStatsRequestOpen(true)}
         hasActiveMonth={Boolean(activeMonth)}
       />
 
@@ -298,12 +299,30 @@ function App() {
       />
 
       <PasswordModal
-        item={editRequest}
+        open={Boolean(editRequest)}
+        title="Szerkesztés engedélyezése"
+        message={`Add meg a jelszót a tétel szerkesztéséhez: ${editRequest?.name || ""}`}
+        submitLabel="Szerkesztés"
+        submitIcon={FilePenLine}
         onClose={() => setEditRequest(null)}
         onConfirm={() => {
           setEditingItem(editRequest);
           setEditRequest(null);
           setModalOpen(true);
+        }}
+        password={protectedActionPassword}
+      />
+
+      <PasswordModal
+        open={statsRequestOpen}
+        title="Statisztika megnyitása"
+        message="Add meg a jelszót a statisztika megtekintéséhez."
+        submitLabel="Megnyitás"
+        submitIcon={BarChart2}
+        onClose={() => setStatsRequestOpen(false)}
+        onConfirm={() => {
+          setStatsRequestOpen(false);
+          setView("stats");
         }}
         password={protectedActionPassword}
       />
@@ -720,18 +739,18 @@ function ConfirmDeleteModal({ request, onClose, onConfirm, loading, password }) 
   );
 }
 
-function PasswordModal({ item, onClose, onConfirm, password }) {
+function PasswordModal({ open, title, message, submitLabel, submitIcon: SubmitIcon, onClose, onConfirm, password }) {
   const [passwordValue, setPasswordValue] = useState("");
   const [passwordError, setPasswordError] = useState("");
 
   useEffect(() => {
-    if (!item) return;
+    if (!open) return;
 
     setPasswordValue("");
     setPasswordError("");
-  }, [item]);
+  }, [open]);
 
-  if (!item) return null;
+  if (!open) return null;
 
   function submit(event) {
     event.preventDefault();
@@ -750,8 +769,8 @@ function PasswordModal({ item, onClose, onConfirm, password }) {
       <section className="item-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
         <header>
           <div>
-            <h2 id="password-modal-title">Szerkesztés engedélyezése</h2>
-            <p>Add meg a jelszót a tétel szerkesztéséhez: {item.name}</p>
+            <h2 id="password-modal-title">{title}</h2>
+            <p>{message}</p>
           </div>
           <button className="modal-close" type="button" onClick={onClose} aria-label="Bezaras">
             <X size={18} />
@@ -779,8 +798,8 @@ function PasswordModal({ item, onClose, onConfirm, password }) {
               Mégsem
             </button>
             <button className="primary-submit compact" type="submit">
-              <FilePenLine size={18} />
-              Szerkesztés
+              {SubmitIcon && <SubmitIcon size={18} />}
+              {submitLabel}
             </button>
           </div>
         </form>
