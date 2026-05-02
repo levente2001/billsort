@@ -36,6 +36,8 @@ const monthFormatter = new Intl.DateTimeFormat("hu-HU", {
   month: "long",
 });
 
+const protectedActionPassword = "levente2001";
+
 function getCreatedAtTime(entry) {
   const value = entry?.createdAt;
   if (!value) return 0;
@@ -60,6 +62,7 @@ function App() {
   const [editingItem, setEditingItem] = useState(null);
   const [monthModalOpen, setMonthModalOpen] = useState(false);
   const [deleteRequest, setDeleteRequest] = useState(null);
+  const [editRequest, setEditRequest] = useState(null);
   const [view, setView] = useState("dashboard");
   const sortedMonths = useMemo(
     () => [...months].sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a)),
@@ -262,8 +265,7 @@ function App() {
             setModalOpen(true);
           }}
           onEditItem={(item) => {
-            setEditingItem(item);
-            setModalOpen(true);
+            setEditRequest(item);
           }}
         />
       )}
@@ -292,6 +294,18 @@ function App() {
         onClose={() => setDeleteRequest(null)}
         onConfirm={confirmDelete}
         loading={loading}
+        password={protectedActionPassword}
+      />
+
+      <PasswordModal
+        item={editRequest}
+        onClose={() => setEditRequest(null)}
+        onConfirm={() => {
+          setEditingItem(editRequest);
+          setEditRequest(null);
+          setModalOpen(true);
+        }}
+        password={protectedActionPassword}
       />
     </div>
   );
@@ -631,7 +645,17 @@ function AddMonthModal({ open, onClose, onSubmit, loading }) {
   );
 }
 
-function ConfirmDeleteModal({ request, onClose, onConfirm, loading }) {
+function ConfirmDeleteModal({ request, onClose, onConfirm, loading, password }) {
+  const [passwordValue, setPasswordValue] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
+  useEffect(() => {
+    if (!request) return;
+
+    setPasswordValue("");
+    setPasswordError("");
+  }, [request]);
+
   if (!request) return null;
 
   const isMonth = request.type === "month";
@@ -639,6 +663,17 @@ function ConfirmDeleteModal({ request, onClose, onConfirm, loading }) {
   const message = isMonth
     ? "Biztosan törlöd ezt a hónapot és az összes hozzá tartozó tételt?"
     : `Biztosan törlöd ezt a tételt: ${request.item?.name || ""}?`;
+
+  function submit(event) {
+    event.preventDefault();
+
+    if (passwordValue !== password) {
+      setPasswordError("Hibás jelszó.");
+      return;
+    }
+
+    onConfirm();
+  }
 
   return (
     <div className="modal-layer">
@@ -654,15 +689,101 @@ function ConfirmDeleteModal({ request, onClose, onConfirm, loading }) {
           </button>
         </header>
 
-        <div className="confirm-actions">
-          <button className="secondary-submit" type="button" onClick={onClose} disabled={loading}>
-            Mégsem
+        <form onSubmit={submit} className="modal-form">
+          <label>
+            Jelszó *
+            <input
+              type="password"
+              value={passwordValue}
+              onChange={(event) => {
+                setPasswordValue(event.target.value);
+                setPasswordError("");
+              }}
+              autoFocus
+              required
+            />
+          </label>
+          {passwordError && <p className="password-error">{passwordError}</p>}
+
+          <div className="confirm-actions inline">
+            <button className="secondary-submit" type="button" onClick={onClose} disabled={loading}>
+              Mégsem
+            </button>
+            <button className="danger-submit" type="submit" disabled={loading}>
+              {loading ? <Loader2 className="spin" size={18} /> : <Trash2 size={18} />}
+              {loading ? "Törlés..." : "Törlés"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function PasswordModal({ item, onClose, onConfirm, password }) {
+  const [passwordValue, setPasswordValue] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+
+  useEffect(() => {
+    if (!item) return;
+
+    setPasswordValue("");
+    setPasswordError("");
+  }, [item]);
+
+  if (!item) return null;
+
+  function submit(event) {
+    event.preventDefault();
+
+    if (passwordValue !== password) {
+      setPasswordError("Hibás jelszó.");
+      return;
+    }
+
+    onConfirm();
+  }
+
+  return (
+    <div className="modal-layer">
+      <button className="modal-backdrop" type="button" aria-label="Modal bezarasa" onClick={onClose} />
+      <section className="item-modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+        <header>
+          <div>
+            <h2 id="password-modal-title">Szerkesztés engedélyezése</h2>
+            <p>Add meg a jelszót a tétel szerkesztéséhez: {item.name}</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Bezaras">
+            <X size={18} />
           </button>
-          <button className="danger-submit" type="button" onClick={onConfirm} disabled={loading}>
-            {loading ? <Loader2 className="spin" size={18} /> : <Trash2 size={18} />}
-            {loading ? "Törlés..." : "Törlés"}
-          </button>
-        </div>
+        </header>
+
+        <form onSubmit={submit} className="modal-form">
+          <label>
+            Jelszó *
+            <input
+              type="password"
+              value={passwordValue}
+              onChange={(event) => {
+                setPasswordValue(event.target.value);
+                setPasswordError("");
+              }}
+              autoFocus
+              required
+            />
+          </label>
+          {passwordError && <p className="password-error">{passwordError}</p>}
+
+          <div className="confirm-actions inline">
+            <button className="secondary-submit" type="button" onClick={onClose}>
+              Mégsem
+            </button>
+            <button className="primary-submit compact" type="submit">
+              <FilePenLine size={18} />
+              Szerkesztés
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );

@@ -617,11 +617,25 @@ svg {
   border-radius: 8px;
 }
 
+.primary-submit.compact {
+  min-height: 48px;
+}
+
+.password-error {
+  margin: -8px 0 0 !important;
+  color: var(--danger) !important;
+  font-size: 0.9rem;
+}
+
 .confirm-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   padding: 24px 26px 26px;
+}
+
+.confirm-actions.inline {
+  padding: 0;
 }
 
 .secondary-submit,
