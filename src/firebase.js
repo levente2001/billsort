@@ -176,17 +176,6 @@ export function createFirebaseAuthService() {
   };
 }
 
-export async function migrateLegacyMonthsToTenant(tenantId, email) {
-  if (normalizeEmail(email || "") !== "kalolevente@gmail.com") return;
-
-  const snapshot = await getDocs(monthsCollection());
-  await Promise.all(
-    snapshot.docs
-      .filter((entry) => !entry.data().tenantId)
-      .map((entry) => updateDoc(entry.ref, { tenantId })),
-  );
-}
-
 export function subscribeTenantsForOwner(ownerEmail, callback) {
   const q = query(usersCollection(), where("ownerEmailLower", "==", normalizeEmail(ownerEmail || "")));
   return onSnapshot(q, (snapshot) => {

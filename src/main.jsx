@@ -33,7 +33,6 @@ import {
   createFirebaseRepository,
   getPublicExport,
   hasFirebaseConfig,
-  migrateLegacyMonthsToTenant,
   subscribeTenantsForOwner,
 } from "./firebase";
 import { createLocalRepository, getLocalPublicExport } from "./localRepository";
@@ -122,15 +121,6 @@ function App() {
       setAuthReady(true);
     });
   }, [authService]);
-
-  useEffect(() => {
-    if (!user || profile?.role !== "tenant") return;
-
-    migrateLegacyMonthsToTenant(user.uid, profile.email).catch((err) => {
-      setError("Nem sikerult a regi honapokat a fiokhoz rendelni.");
-      console.error(err);
-    });
-  }, [profile, user]);
 
   useEffect(() => {
     if (!profile || profile.role !== "owner") return undefined;
