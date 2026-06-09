@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Clock,
   Download,
+  Copy,
+  ExternalLink,
   FilePenLine,
   FileText,
   FileWarning,
@@ -17,6 +19,7 @@ import {
   Plus,
   PlusCircle,
   Save,
+  Share2,
   Settings,
   Trash2,
   TrendingUp,
@@ -28,11 +31,12 @@ import {
   addOwnerToTenant,
   createFirebaseAuthService,
   createFirebaseRepository,
+  getPublicExport,
   hasFirebaseConfig,
   migrateLegacyMonthsToTenant,
   subscribeTenantsForOwner,
 } from "./firebase";
-import { createLocalRepository } from "./localRepository";
+import { createLocalRepository, getLocalPublicExport } from "./localRepository";
 import "./styles.css";
 
 const currency = new Intl.NumberFormat("hu-HU", {
@@ -55,6 +59,11 @@ const auditDateFormatter = new Intl.DateTimeFormat("hu-HU", {
 });
 
 const protectedActionPassword = "levente2001";
+
+function getExportToken() {
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  return hash.get("export") || "";
+}
 
 function getCreatedAtTime(entry) {
   const value = entry?.createdAt;
@@ -96,6 +105,8 @@ function App() {
   const [deleteRequest, setDeleteRequest] = useState(null);
   const [editRequest, setEditRequest] = useState(null);
   const [statsRequestOpen, setStatsRequestOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportUrl, setExportUrl] = useState("");
   const [view, setView] = useState("dashboard");
   const sortedMonths = useMemo(
     () => [...months].sort((a, b) => getCreatedAtTime(b) - getCreatedAtTime(a)),
@@ -318,6 +329,24 @@ function App() {
     }
   }
 
+  async function createExport() {
+    if (!repository) return;
+
+    setError("");
+    setLoading(true);
+    try {
+      const token = await repository.createPublicExport(activeTenant?.email || profile?.email || "");
+      const url = `${window.location.origin}${window.location.pathname}#export=${token}`;
+      setExportUrl(url);
+      setExportOpen(true);
+    } catch (err) {
+      setError("Nem sikerült létrehozni a publikus export linket.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   if (!authReady) {
     return <LoadingScreen />;
   }
@@ -341,11 +370,14 @@ function App() {
         }}
         onStats={() => setStatsRequestOpen(true)}
         onAudit={() => setView("audit")}
+        onExport={createExport}
         onSettings={() => setSettingsOpen(true)}
         onLogout={() => authService?.signOut()}
         hasActiveMonth={Boolean(activeMonth) && isTenant}
         canAddItem={isTenant}
         canViewStats={isTenant}
+        canExport={Boolean(repository)}
+        loading={loading}
         userEmail={profile?.email}
         role={profile?.role}
       />
@@ -447,6 +479,13 @@ function App() {
             ownerEmailLower: ownerEmail.trim().toLowerCase(),
           }));
         }}
+      />
+
+      <ExportModal
+        open={exportOpen}
+        url={exportUrl}
+        localOnly={repository?.mode === "local"}
+        onClose={() => setExportOpen(false)}
       />
 
       <ConfirmDeleteModal
@@ -657,11 +696,14 @@ function Header({
   onAddItem,
   onStats,
   onAudit,
+  onExport,
   onSettings,
   onLogout,
   hasActiveMonth,
   canAddItem,
   canViewStats,
+  canExport,
+  loading,
   userEmail,
   role,
 }) {
@@ -718,6 +760,19 @@ function Header({
                 <ClipboardList size={20} />
                 Audit log
               </button>
+              {canExport && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onExport();
+                  }}
+                  disabled={loading}
+                >
+                  <Share2 size={20} />
+                  Export
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -743,6 +798,165 @@ function Header({
         )}
       </div>
     </header>
+  );
+}
+
+function ExportModal({ open, url, localOnly, onClose }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (open) setCopied(false);
+  }, [open, url]);
+
+  if (!open) return null;
+
+  async function copyUrl() {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const input = document.createElement("input");
+      input.value = url;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+    }
+    setCopied(true);
+  }
+
+  return (
+    <div className="modal-layer">
+      <button className="modal-backdrop" type="button" aria-label="Modal bezárása" onClick={onClose} />
+      <section className="item-modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+        <header>
+          <div>
+            <h2 id="export-modal-title">Publikus export</h2>
+            <p>A link birtokában bárki láthatja a bérlő összes jelenlegi tételét.</p>
+          </div>
+          <button className="modal-close" type="button" onClick={onClose} aria-label="Bezárás">
+            <X size={18} />
+          </button>
+        </header>
+        <div className="export-content">
+          {localOnly && (
+            <p className="export-warning">
+              Demó módban a link csak ezen a böngészőn működik. Firebase módban valóban megosztható.
+            </p>
+          )}
+          <label>
+            Megosztható link
+            <input value={url} readOnly onFocus={(event) => event.target.select()} />
+          </label>
+          <div className="export-actions">
+            <button className="secondary-submit" type="button" onClick={copyUrl}>
+              <Copy size={18} />
+              {copied ? "Kimásolva" : "Link másolása"}
+            </button>
+            <a className="primary-submit" href={url} target="_blank" rel="noreferrer">
+              <ExternalLink size={18} />
+              Megnyitás
+            </a>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PublicExportPage({ token }) {
+  const [exportData, setExportData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function load() {
+      try {
+        const data = hasFirebaseConfig
+          ? await getPublicExport(token)
+          : getLocalPublicExport(token);
+        if (!active) return;
+        if (!data) {
+          setError("Ez az export link nem található vagy már nem érhető el.");
+        } else {
+          setExportData(data);
+        }
+      } catch (err) {
+        if (active) setError("Az export nem tölthető be.");
+        console.error(err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [token]);
+
+  if (loading) return <LoadingScreen />;
+
+  if (error) {
+    return (
+      <main className="public-export-page public-export-empty">
+        <FileX size={44} />
+        <h1>BillSort export</h1>
+        <p>{error}</p>
+      </main>
+    );
+  }
+
+  const months = [...(exportData?.months || [])].sort(
+    (a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0),
+  );
+  const allItems = months.flatMap((month) => month.items || []);
+  const total = allItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  return (
+    <div className="app-frame public-export">
+      <header className="public-export-header">
+        <div>
+          <strong>BillSort</strong>
+          <span>Publikus, csak olvasható export</span>
+        </div>
+        {exportData.tenantEmail && <p>{exportData.tenantEmail}</p>}
+      </header>
+      <main className="public-export-page">
+        <section className="public-export-summary">
+          <div>
+            <span>Összes tétel</span>
+            <strong>{allItems.length}</strong>
+          </div>
+          <div>
+            <span>Teljes összeg</span>
+            <strong>{currency.format(total)}</strong>
+          </div>
+          <div>
+            <span>Befizetve</span>
+            <strong>{allItems.filter((item) => item.paid).length}/{allItems.length}</strong>
+          </div>
+        </section>
+        {months.map((month) => {
+          const monthItems = month.items || [];
+          const monthTotal = monthItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+          return (
+            <section className="public-month" key={month.id}>
+              <header>
+                <div>
+                  <h2>{month.label}</h2>
+                  <p>{monthItems.length} tétel</p>
+                </div>
+                <strong>{currency.format(monthTotal)}</strong>
+              </header>
+              <ItemTable viewerRole="public" items={monthItems} loading={false} />
+            </section>
+          );
+        })}
+        {months.length === 0 && <p className="stats-empty">Az exportban még nincs tétel.</p>}
+      </main>
+    </div>
   );
 }
 
@@ -849,6 +1063,8 @@ function DashboardPage({
 }
 
 function ItemTable({ viewerRole, items, onDelete, onEdit, onAccept, loading, onAddItem }) {
+  const isPublic = viewerRole === "public";
+
   if (items.length === 0) {
     return (
       <section className="empty-list">
@@ -870,7 +1086,7 @@ function ItemTable({ viewerRole, items, onDelete, onEdit, onAccept, loading, onA
         <span>Tétel</span>
         <span>Összeg</span>
         <span>Fájlok</span>
-        <span>Akciók</span>
+        {!isPublic && <span>Akciók</span>}
       </div>
       {items.map((item) => (
         <article className="table-row" key={item.id}>
@@ -886,35 +1102,49 @@ function ItemTable({ viewerRole, items, onDelete, onEdit, onAccept, loading, onA
             <FileChip file={item.invoiceFile} label="Számla" />
             <FileChip file={item.receiptFile} label="Visszaig." />
           </div>
-          <div className="action-cell">
-            {viewerRole === "owner" ? (
-              item.ownerAccepted ? (
-                <span className="accepted-chip">
-                  <CheckCircle2 size={14} />
-                  Elfogadva
-                </span>
-              ) : (
-                <button className="accept-chip" type="button" onClick={() => onAccept(item)} disabled={loading}>
-                  <CheckCircle2 size={14} />
-                  Elfogadom
-                </button>
-              )
-            ) : (
-              <>
-                {item.ownerAccepted && (
-                  <span className="accepted-icon" title="Tulajdonos elfogadta">
-                    <CheckCircle2 size={15} />
+          {!isPublic && (
+            <div className="action-cell">
+              {viewerRole === "owner" ? (
+                item.ownerAccepted ? (
+                  <span className="accepted-chip">
+                    <CheckCircle2 size={14} />
+                    Elfogadva
                   </span>
-                )}
-                <button className="edit-chip" type="button" onClick={() => onEdit(item)} disabled={loading} aria-label="Tetel szerkesztese">
-                  <FilePenLine size={16} />
-                </button>
-                <button className="delete-chip" type="button" onClick={() => onDelete(item)} disabled={loading} aria-label="Tetel torlese">
-                  <Trash2 size={16} />
-                </button>
-              </>
-            )}
-          </div>
+                ) : (
+                  <button className="accept-chip" type="button" onClick={() => onAccept(item)} disabled={loading}>
+                    <CheckCircle2 size={14} />
+                    Elfogadom
+                  </button>
+                )
+              ) : (
+                <>
+                  {item.ownerAccepted && (
+                    <span className="accepted-icon" title="Tulajdonos elfogadta">
+                      <CheckCircle2 size={15} />
+                    </span>
+                  )}
+                  <button
+                    className="edit-chip"
+                    type="button"
+                    onClick={() => onEdit(item)}
+                    disabled={loading}
+                    aria-label="Tetel szerkesztese"
+                  >
+                    <FilePenLine size={16} />
+                  </button>
+                  <button
+                    className="delete-chip"
+                    type="button"
+                    onClick={() => onDelete(item)}
+                    disabled={loading}
+                    aria-label="Tetel torlese"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </article>
       ))}
     </section>
@@ -1360,4 +1590,7 @@ function StatCard({ icon: Icon, label, value, warning }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const exportToken = getExportToken();
+createRoot(document.getElementById("root")).render(
+  exportToken ? <PublicExportPage token={exportToken} /> : <App />,
+);

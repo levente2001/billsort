@@ -791,6 +791,152 @@ svg {
   margin: 0;
 }
 
+.export-content {
+  display: grid;
+  gap: 18px;
+  padding: 26px;
+}
+
+.export-content label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted-foreground);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.export-content input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  color: var(--foreground);
+  background: #fbfcfc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.export-warning {
+  margin: 0 !important;
+  padding: 12px 14px;
+  color: #73530d !important;
+  background: #fff8dd;
+  border: 1px solid #eed27a;
+  border-radius: 8px;
+}
+
+.export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.export-actions .primary-submit {
+  min-height: 48px;
+  text-decoration: none;
+}
+
+.public-export-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 76px;
+  padding: 0 max(24px, calc((100% - 1180px) / 2));
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.public-export-header div {
+  display: grid;
+  gap: 2px;
+}
+
+.public-export-header strong {
+  color: var(--primary);
+  font-size: 1.08rem;
+}
+
+.public-export-header span,
+.public-export-header p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.public-export-page {
+  width: min(1180px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 34px 0 70px;
+}
+
+.public-export-empty {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  min-height: 100vh;
+  text-align: center;
+}
+
+.public-export-empty h1,
+.public-export-empty p {
+  margin: 8px 0 0;
+}
+
+.public-export-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.public-export-summary div {
+  display: grid;
+  gap: 8px;
+  padding: 20px 22px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.public-export-summary span {
+  color: var(--muted-foreground);
+  font-weight: 800;
+}
+
+.public-export-summary strong {
+  font-size: 1.3rem;
+}
+
+.public-month {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.public-month > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.public-month h2,
+.public-month p {
+  margin: 0;
+}
+
+.public-month p {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-weight: 700;
+}
+
+.public-month .table-head,
+.public-month .table-row {
+  grid-template-columns: minmax(0, 1fr) 130px 190px;
+}
+
 .audit-page {
   min-height: calc(100vh - 76px);
 }
@@ -1128,8 +1274,27 @@ svg {
 
   .file-input-grid,
   .stats-grid,
-  .confirm-actions {
+  .confirm-actions,
+  .export-actions,
+  .public-export-summary {
     grid-template-columns: 1fr;
+  }
+
+  .public-export-header {
+    min-height: 82px;
+    padding: 14px;
+  }
+
+  .public-export-header p {
+    max-width: 48vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .public-export-page {
+    width: min(100% - 28px, 620px);
+    padding-top: 24px;
   }
 
   .stats-content {

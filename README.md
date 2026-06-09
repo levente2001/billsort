@@ -22,10 +22,20 @@ Firebase beallitas nelkul a felulet demó módban indul, hogy localhoston azonna
 
 Vercelen ugyanazokat a `VITE_FIREBASE_*` valtozokat add hozza az Environment Variables reszben.
 
+Az export linkek publikus olvasásához telepítsd a repositoryban lévő Firestore szabályokat:
+
+```bash
+firebase deploy --only firestore:rules
+```
+
+Az export egy csak olvasható pillanatfelvételt készít a bérlő összes aktuális hónapjáról és
+tételéről. Új export készítése új linket hoz létre.
+
 ## Firestore adatstruktura
 
 - `months`: havi fulek
 - `months/{monthId}/items`: az adott honap teteleinek listaja
 - `auditLogs`: berlohoz kotott modositasnaplo
+- `publicExports`: tokennel elérhető, csak olvasható teljes bérlői exportok
 - `users`: felhasznaloi profilok es berlo-tulajdonos kapcsolatok
 - Storage: `months/{monthId}/items/{itemId}/...pdf`

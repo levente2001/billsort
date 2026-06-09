@@ -50,6 +50,7 @@ const monthsCollection = () => collection(db, "months");
 const itemsCollection = (monthId) => collection(db, "months", monthId, "items");
 const usersCollection = () => collection(db, "users");
 const auditLogsCollection = () => collection(db, "auditLogs");
+const publicExportDoc = (token) => doc(db, "publicExports", token);
 const userDoc = (uid) => doc(db, "users", uid);
 
 function cleanStorageName(name) {
@@ -95,6 +96,36 @@ async function writeAuditLog(tenantId, actor, action, details) {
 
 function normalizeEmail(email) {
   return email.trim().toLowerCase();
+}
+
+function exportFile(file) {
+  if (!file) return null;
+  return {
+    name: file.name || "",
+    size: Number(file.size || 0),
+    url: file.url || "",
+  };
+}
+
+function exportItem(entry) {
+  const item = entry.data();
+  return {
+    id: entry.id,
+    name: item.name || "",
+    amount: Number(item.amount || 0),
+    note: item.note || "",
+    paid: Boolean(item.paid),
+    ownerAccepted: Boolean(item.ownerAccepted),
+    invoiceFile: exportFile(item.invoiceFile),
+    receiptFile: exportFile(item.receiptFile),
+  };
+}
+
+export async function getPublicExport(token) {
+  if (!hasFirebaseConfig || !token) return null;
+
+  const snapshot = await getDoc(publicExportDoc(token));
+  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
 }
 
 async function readUserProfile(user) {
@@ -299,5 +330,38 @@ export function createFirebaseRepository(tenantId, viewer) {
         `Elfogadott tétel: ${item.name || "Névtelen tétel"}`,
       );
     },
+
+    async createPublicExport(tenantEmail) {
+      const token = crypto.randomUUID().replaceAll("-", "");
+      const monthsSnapshot = await getDocs(
+        query(monthsCollection(), where("tenantId", "==", tenantId)),
+      );
+      const months = await Promise.all(
+        monthsSnapshot.docs.map(async (monthEntry) => {
+          const itemsSnapshot = await getDocs(itemsCollection(monthEntry.id));
+          return {
+            id: monthEntry.id,
+            label: monthEntry.data().label || "",
+            createdAt: getExportDate(monthEntry.data().createdAt),
+            items: itemsSnapshot.docs.map(exportItem),
+          };
+        }),
+      );
+
+      await setDoc(publicExportDoc(token), {
+        tenantId,
+        tenantEmail: tenantEmail || "",
+        months,
+        createdAt: serverTimestamp(),
+      });
+      await writeAuditLog(tenantId, viewer, "Publikus export", "Megosztható link létrehozva");
+      return token;
+    },
   };
+}
+
+function getExportDate(value) {
+  if (!value) return "";
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return String(value);
 }

@@ -1,0 +1,48 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function canAccessTenant(tenantId) {
+      return signedIn() && (
+        request.auth.uid == tenantId ||
+        userProfile(tenantId).ownerEmailLower == request.auth.token.email.lower()
+      );
+    }
+
+    match /users/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow read, update: if canAccessTenant(userId);
+    }
+
+    match /months/{monthId} {
+      allow create: if canAccessTenant(request.resource.data.tenantId);
+      allow read, update, delete: if canAccessTenant(resource.data.tenantId);
+
+      match /items/{itemId} {
+        allow read, write: if canAccessTenant(
+          get(/databases/$(database)/documents/months/$(monthId)).data.tenantId
+        );
+      }
+    }
+
+    match /auditLogs/{logId} {
+      allow read: if canAccessTenant(resource.data.tenantId);
+      allow create: if canAccessTenant(request.resource.data.tenantId);
+    }
+
+    match /publicExports/{token} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if canAccessTenant(request.resource.data.tenantId);
+      allow update, delete: if false;
+    }
+  }
+}

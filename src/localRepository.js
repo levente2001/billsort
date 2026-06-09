@@ -1,4 +1,5 @@
 const STORAGE_KEY = "billsort-local-state";
+const EXPORT_KEY_PREFIX = "billsort-public-export-";
 
 function readState() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -140,5 +141,38 @@ export function createLocalRepository() {
       writeState(state);
       notifyItems(monthId);
     },
+
+    async createPublicExport(tenantEmail) {
+      const state = readState();
+      const token = crypto.randomUUID().replaceAll("-", "");
+      const months = state.months.map((month) => ({
+        ...month,
+        items: state.items[month.id] || [],
+      }));
+      localStorage.setItem(
+        `${EXPORT_KEY_PREFIX}${token}`,
+        JSON.stringify({
+          id: token,
+          tenantEmail: tenantEmail || "Helyi demó",
+          months,
+          createdAt: new Date().toISOString(),
+          localOnly: true,
+        }),
+      );
+      return token;
+    },
   };
+}
+
+export function getLocalPublicExport(token) {
+  if (!token) return null;
+
+  const saved = localStorage.getItem(`${EXPORT_KEY_PREFIX}${token}`);
+  if (!saved) return null;
+
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return null;
+  }
 }
