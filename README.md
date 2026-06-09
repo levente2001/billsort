@@ -28,8 +28,9 @@ Az export linkek publikus olvasásához telepítsd a repositoryban lévő Firest
 firebase deploy --only firestore:rules
 ```
 
-Az export egy csak olvasható pillanatfelvételt készít a bérlő összes aktuális hónapjáról és
-tételéről. Új export készítése új linket hoz létre.
+Az export egy csak olvasható, valós időben frissülő nézetet készít a bérlő publikusra jelölt
+tételeiről. A meglévő linkek automatikusan frissülnek, amikor az alkalmazásban változik egy hónap
+vagy tétel.
 
 ## Firestore adatstruktura
 

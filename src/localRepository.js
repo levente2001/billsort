@@ -16,6 +16,34 @@ function writeState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function buildLocalExportMonths(state) {
+  return state.months.map((month) => ({
+    ...month,
+    items: (state.items[month.id] || []).filter((item) => item.isPublic !== false),
+  }));
+}
+
+function refreshLocalExports(state) {
+  const months = buildLocalExportMonths(state);
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith(EXPORT_KEY_PREFIX))
+    .forEach((key) => {
+      try {
+        const current = JSON.parse(localStorage.getItem(key));
+        localStorage.setItem(
+          key,
+          JSON.stringify({
+            ...current,
+            months,
+            updatedAt: new Date().toISOString(),
+          }),
+        );
+      } catch {
+        // Ignore malformed demo exports.
+      }
+    });
+}
+
 function toLocalFile(file) {
   if (!file) return null;
   return new Promise((resolve, reject) => {
@@ -76,6 +104,7 @@ export function createLocalRepository() {
         createdAt: new Date().toISOString(),
       });
       writeState(state);
+      refreshLocalExports(state);
       notifyMonths();
     },
 
@@ -84,6 +113,7 @@ export function createLocalRepository() {
       state.months = state.months.filter((month) => month.id !== monthId);
       delete state.items[monthId];
       writeState(state);
+      refreshLocalExports(state);
       notifyMonths();
       notifyItems(monthId);
     },
@@ -108,6 +138,7 @@ export function createLocalRepository() {
 
       state.items[monthId] = [item, ...(state.items[monthId] || [])];
       writeState(state);
+      refreshLocalExports(state);
       notifyItems(monthId);
     },
 
@@ -134,6 +165,7 @@ export function createLocalRepository() {
       );
 
       writeState(state);
+      refreshLocalExports(state);
       notifyItems(monthId);
     },
 
@@ -141,16 +173,14 @@ export function createLocalRepository() {
       const state = readState();
       state.items[monthId] = (state.items[monthId] || []).filter((entry) => entry.id !== item.id);
       writeState(state);
+      refreshLocalExports(state);
       notifyItems(monthId);
     },
 
     async createPublicExport(tenantEmail) {
       const state = readState();
       const token = crypto.randomUUID().replaceAll("-", "");
-      const months = state.months.map((month) => ({
-        ...month,
-        items: (state.items[month.id] || []).filter((item) => item.isPublic !== false),
-      }));
+      const months = buildLocalExportMonths(state);
       localStorage.setItem(
         `${EXPORT_KEY_PREFIX}${token}`,
         JSON.stringify({
@@ -158,6 +188,7 @@ export function createLocalRepository() {
           tenantEmail: tenantEmail || "Helyi demó",
           months,
           createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
           localOnly: true,
         }),
       );

@@ -31,8 +31,8 @@ import {
   addOwnerToTenant,
   createFirebaseAuthService,
   createFirebaseRepository,
-  getPublicExport,
   hasFirebaseConfig,
+  subscribePublicExport,
   subscribeTenantsForOwner,
 } from "./firebase";
 import { createLocalRepository, getLocalPublicExport } from "./localRepository";
@@ -859,31 +859,27 @@ function PublicExportPage({ token }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let active = true;
-
-    async function load() {
-      try {
-        const data = hasFirebaseConfig
-          ? await getPublicExport(token)
-          : getLocalPublicExport(token);
-        if (!active) return;
-        if (!data) {
-          setError("Ez az export link nem található vagy már nem érhető el.");
-        } else {
+    if (hasFirebaseConfig) {
+      return subscribePublicExport(
+        token,
+        (data) => {
           setExportData(data);
-        }
-      } catch (err) {
-        if (active) setError("Az export nem tölthető be.");
-        console.error(err);
-      } finally {
-        if (active) setLoading(false);
-      }
+          setError(data ? "" : "Ez az export link nem található vagy már nem érhető el.");
+          setLoading(false);
+        },
+        (err) => {
+          setError("Az export nem tölthető be.");
+          setLoading(false);
+          console.error(err);
+        },
+      );
     }
 
-    load();
-    return () => {
-      active = false;
-    };
+    const data = getLocalPublicExport(token);
+    setExportData(data);
+    setError(data ? "" : "Ez az export link nem található vagy már nem érhető el.");
+    setLoading(false);
+    return undefined;
   }, [token]);
 
   if (loading) return <LoadingScreen />;

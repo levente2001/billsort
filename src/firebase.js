@@ -121,11 +121,16 @@ function exportItem(entry) {
   };
 }
 
-export async function getPublicExport(token) {
-  if (!hasFirebaseConfig || !token) return null;
+export function subscribePublicExport(token, callback, onError) {
+  if (!hasFirebaseConfig || !token) return () => {};
 
-  const snapshot = await getDoc(publicExportDoc(token));
-  return snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null;
+  return onSnapshot(
+    publicExportDoc(token),
+    (snapshot) => {
+      callback(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null);
+    },
+    onError,
+  );
 }
 
 async function readUserProfile(user) {
@@ -198,6 +203,43 @@ export async function addOwnerToTenant(tenantId, ownerEmail, actor) {
 }
 
 export function createFirebaseRepository(tenantId, viewer) {
+  async function buildPublicExportMonths() {
+    const monthsSnapshot = await getDocs(
+      query(monthsCollection(), where("tenantId", "==", tenantId)),
+    );
+
+    return Promise.all(
+      monthsSnapshot.docs.map(async (monthEntry) => {
+        const itemsSnapshot = await getDocs(itemsCollection(monthEntry.id));
+        return {
+          id: monthEntry.id,
+          label: monthEntry.data().label || "",
+          createdAt: getExportDate(monthEntry.data().createdAt),
+          items: itemsSnapshot.docs
+            .filter((entry) => entry.data().isPublic !== false)
+            .map(exportItem),
+        };
+      }),
+    );
+  }
+
+  async function refreshPublicExports() {
+    const exportsSnapshot = await getDocs(
+      query(collection(db, "publicExports"), where("tenantId", "==", tenantId)),
+    );
+    if (exportsSnapshot.empty) return;
+
+    const months = await buildPublicExportMonths();
+    await Promise.all(
+      exportsSnapshot.docs.map((entry) =>
+        updateDoc(entry.ref, {
+          months,
+          updatedAt: serverTimestamp(),
+        }),
+      ),
+    );
+  }
+
   return {
     mode: "firebase",
     tenantId,
@@ -231,6 +273,7 @@ export function createFirebaseRepository(tenantId, viewer) {
         createdAt: serverTimestamp(),
       });
       await writeAuditLog(tenantId, viewer, "Hónap létrehozása", label);
+      await refreshPublicExports();
       return monthRef;
     },
 
@@ -244,6 +287,7 @@ export function createFirebaseRepository(tenantId, viewer) {
       await Promise.all(items.map((item) => deleteDoc(doc(db, "months", monthId, "items", item.id))));
       await deleteDoc(doc(db, "months", monthId));
       await writeAuditLog(tenantId, viewer, "Hónap törlése", `${items.length} tétel törölve`);
+      await refreshPublicExports();
     },
 
     async createItem(monthId, data) {
@@ -266,6 +310,7 @@ export function createFirebaseRepository(tenantId, viewer) {
 
       await updateDoc(itemRef, { invoiceFile, receiptFile });
       await writeAuditLog(tenantId, viewer, "Tétel létrehozása", `${data.name} (${Number(data.amount || 0)} Ft)`);
+      await refreshPublicExports();
       return itemRef;
     },
 
@@ -299,12 +344,14 @@ export function createFirebaseRepository(tenantId, viewer) {
         receiptFile,
       });
       await writeAuditLog(tenantId, viewer, "Tétel módosítása", `${item.name} -> ${data.name}`);
+      await refreshPublicExports();
     },
 
     async deleteItem(monthId, item) {
       await Promise.all([deleteStoredFile(item.invoiceFile), deleteStoredFile(item.receiptFile)]);
       await deleteDoc(doc(db, "months", monthId, "items", item.id));
       await writeAuditLog(tenantId, viewer, "Tétel törlése", item.name || "Névtelen tétel");
+      await refreshPublicExports();
     },
 
     async acceptItem(monthId, item) {
@@ -320,32 +367,19 @@ export function createFirebaseRepository(tenantId, viewer) {
         "Tulajdonosi elfogadás",
         `Elfogadott tétel: ${item.name || "Névtelen tétel"}`,
       );
+      await refreshPublicExports();
     },
 
     async createPublicExport(tenantEmail) {
       const token = crypto.randomUUID().replaceAll("-", "");
-      const monthsSnapshot = await getDocs(
-        query(monthsCollection(), where("tenantId", "==", tenantId)),
-      );
-      const months = await Promise.all(
-        monthsSnapshot.docs.map(async (monthEntry) => {
-          const itemsSnapshot = await getDocs(itemsCollection(monthEntry.id));
-          return {
-            id: monthEntry.id,
-            label: monthEntry.data().label || "",
-            createdAt: getExportDate(monthEntry.data().createdAt),
-            items: itemsSnapshot.docs
-              .filter((entry) => entry.data().isPublic !== false)
-              .map(exportItem),
-          };
-        }),
-      );
+      const months = await buildPublicExportMonths();
 
       await setDoc(publicExportDoc(token), {
         tenantId,
         tenantEmail: tenantEmail || "",
         months,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       await writeAuditLog(tenantId, viewer, "Publikus export", "Megosztható link létrehozva");
       return token;

@@ -40,9 +40,11 @@ service cloud.firestore {
 
     match /publicExports/{token} {
       allow get: if true;
-      allow list: if false;
+      allow list: if canAccessTenant(resource.data.tenantId);
       allow create: if canAccessTenant(request.resource.data.tenantId);
-      allow update, delete: if false;
+      allow update: if canAccessTenant(resource.data.tenantId)
+        && request.resource.data.tenantId == resource.data.tenantId;
+      allow delete: if false;
     }
   }
 }
