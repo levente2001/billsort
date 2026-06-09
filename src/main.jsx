@@ -911,8 +911,6 @@ function PublicExportPage({ token }) {
   const months = [...(exportData?.months || [])].sort(
     (a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0),
   );
-  const allItems = months.flatMap((month) => month.items || []);
-  const total = allItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
   return (
     <div className="app-frame public-export">
@@ -924,20 +922,6 @@ function PublicExportPage({ token }) {
         {exportData.tenantEmail && <p>{exportData.tenantEmail}</p>}
       </header>
       <main className="public-export-page">
-        <section className="public-export-summary">
-          <div>
-            <span>Összes tétel</span>
-            <strong>{allItems.length}</strong>
-          </div>
-          <div>
-            <span>Teljes összeg</span>
-            <strong>{currency.format(total)}</strong>
-          </div>
-          <div>
-            <span>Befizetve</span>
-            <strong>{allItems.filter((item) => item.paid).length}/{allItems.length}</strong>
-          </div>
-        </section>
         {months.map((month) => {
           const monthItems = month.items || [];
           const monthTotal = monthItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);

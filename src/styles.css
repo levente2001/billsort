@@ -883,31 +883,6 @@ svg {
   margin: 8px 0 0;
 }
 
-.public-export-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 28px;
-}
-
-.public-export-summary div {
-  display: grid;
-  gap: 8px;
-  padding: 20px 22px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.public-export-summary span {
-  color: var(--muted-foreground);
-  font-weight: 800;
-}
-
-.public-export-summary strong {
-  font-size: 1.3rem;
-}
-
 .public-month {
   display: grid;
   gap: 14px;
@@ -1275,8 +1250,7 @@ svg {
   .file-input-grid,
   .stats-grid,
   .confirm-actions,
-  .export-actions,
-  .public-export-summary {
+  .export-actions {
     grid-template-columns: 1fr;
   }
 
