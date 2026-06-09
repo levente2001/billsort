@@ -100,6 +100,7 @@ export function createLocalRepository() {
         amount: Number(data.amount || 0),
         note: data.note || "",
         paid: data.paid,
+        isPublic: data.isPublic,
         invoiceFile,
         receiptFile,
         createdAt: new Date().toISOString(),
@@ -125,6 +126,7 @@ export function createLocalRepository() {
               amount: Number(data.amount || 0),
               note: data.note || "",
               paid: data.paid,
+              isPublic: data.isPublic,
               invoiceFile,
               receiptFile,
             }
@@ -147,7 +149,7 @@ export function createLocalRepository() {
       const token = crypto.randomUUID().replaceAll("-", "");
       const months = state.months.map((month) => ({
         ...month,
-        items: state.items[month.id] || [],
+        items: (state.items[month.id] || []).filter((item) => item.isPublic !== false),
       }));
       localStorage.setItem(
         `${EXPORT_KEY_PREFIX}${token}`,

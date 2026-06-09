@@ -263,6 +263,7 @@ export function createFirebaseRepository(tenantId, viewer) {
         amount: Number(data.amount || 0),
         note: data.note || "",
         paid: data.paid,
+        isPublic: data.isPublic,
         ownerAccepted: false,
         ownerAcceptedAt: null,
         ownerAcceptedBy: null,
@@ -301,6 +302,7 @@ export function createFirebaseRepository(tenantId, viewer) {
         amount: Number(data.amount || 0),
         note: data.note || "",
         paid: data.paid,
+        isPublic: data.isPublic,
         ownerAccepted: item.ownerAccepted || false,
         ownerAcceptedAt: item.ownerAcceptedAt || null,
         ownerAcceptedBy: item.ownerAcceptedBy || null,
@@ -343,7 +345,9 @@ export function createFirebaseRepository(tenantId, viewer) {
             id: monthEntry.id,
             label: monthEntry.data().label || "",
             createdAt: getExportDate(monthEntry.data().createdAt),
-            items: itemsSnapshot.docs.map(exportItem),
+            items: itemsSnapshot.docs
+              .filter((entry) => entry.data().isPublic !== false)
+              .map(exportItem),
           };
         }),
       );

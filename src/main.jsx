@@ -1195,6 +1195,7 @@ function AddItemModal({ open, onClose, onSubmit, loading, activeMonth, item }) {
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [paid, setPaid] = useState(true);
+  const [isPublic, setIsPublic] = useState(true);
   const [note, setNote] = useState("");
   const [invoiceFile, setInvoiceFile] = useState(null);
   const [receiptFile, setReceiptFile] = useState(null);
@@ -1206,6 +1207,7 @@ function AddItemModal({ open, onClose, onSubmit, loading, activeMonth, item }) {
     setName(item?.name || "");
     setAmount(item?.amount != null ? String(item.amount) : "");
     setPaid(item?.paid ?? true);
+    setIsPublic(item?.isPublic ?? true);
     setNote(item?.note || "");
     setInvoiceFile(null);
     setReceiptFile(null);
@@ -1221,6 +1223,7 @@ function AddItemModal({ open, onClose, onSubmit, loading, activeMonth, item }) {
       name: name.trim(),
       amount,
       paid,
+      isPublic,
       note: note.trim(),
       invoiceFile,
       receiptFile,
@@ -1229,6 +1232,7 @@ function AddItemModal({ open, onClose, onSubmit, loading, activeMonth, item }) {
     setName("");
     setAmount("");
     setPaid(true);
+    setIsPublic(true);
     setNote("");
     setInvoiceFile(null);
     setReceiptFile(null);
@@ -1290,6 +1294,15 @@ function AddItemModal({ open, onClose, onSubmit, loading, activeMonth, item }) {
           <label className="checkbox-row">
             <input type="checkbox" checked={paid} onChange={(event) => setPaid(event.target.checked)} />
             Befizetve
+          </label>
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={isPublic}
+              onChange={(event) => setIsPublic(event.target.checked)}
+            />
+            Publikus a megosztott exportban
           </label>
 
           <button className="primary-submit" type="submit" disabled={loading}>
